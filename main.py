@@ -1,7 +1,7 @@
 import asyncio
 import os
 import shutil
-import zipfile
+import base64
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import FSInputFile
@@ -23,7 +23,7 @@ async def cmd_start(message: types.Message):
         "1. Відправте мені **ФОТО (скріншот)**, а в поле **ПІДПИС** вставте посилання.\n"
         "2. Я запам'ятаю їх по черзі.\n"
         "3. Коли закінчите зміну, напишіть /report\n\n"
-        "Я згенерую гарну HTML-сторінку, де фото та посилання будуть поруч!\n"
+        "Я згенерую ОДИН єдиний HTML-файл з усіма фотографіями всередині!\n"
         "Для скидання прогресу напишіть /clear"
     )
     await message.answer(text, parse_mode="Markdown")
@@ -64,7 +64,6 @@ async def cmd_report(message: types.Message):
     user_dir = f"temp_report_{user_id}"
     os.makedirs(user_dir, exist_ok=True)
     
-    # Починаємо формувати HTML сторінку з красивим дизайном
     html_lines = [
         "<!DOCTYPE html>",
         "<html><head><meta charset='utf-8'><title>Звіт Коментарів</title>",
@@ -84,41 +83,37 @@ async def cmd_report(message: types.Message):
     
     try:
         for index, item in enumerate(data, start=1):
-            file_path = os.path.join(user_dir, f"{index}.jpg")
-            
-            # Завантажуємо фотографію
             file_info = await bot.get_file(item["file_id"])
-            await bot.download_file(file_info.file_path, destination=file_path)
+            
+            # Завантажуємо файл у пам'ять
+            downloaded_file = await bot.download_file(file_info.file_path)
+            file_bytes = downloaded_file.read()
+            
+            # Конвертуємо фото у формат Base64 (текстовий код)
+            base64_image = base64.b64encode(file_bytes).decode('utf-8')
             
             safe_url = item["url"]
-            # Додаємо блок зі скріншотом і лінком у HTML
+            # Вшиваємо код фотографії прямо в HTML!
             html_lines.append(
                 f"<div class='card'>"
                 f"<h3>№{index}</h3>"
-                f"<img src='{index}.jpg' alt='Скріншот {index}'>"
+                f"<img src='data:image/jpeg;base64,{base64_image}' alt='Скріншот {index}'>"
                 f"<div class='link'><a href='{safe_url}' target='_blank'>🔗 {safe_url}</a></div>"
                 f"</div>"
             )
             
         html_lines.append("</div></body></html>")
         
-        # Зберігаємо HTML файл
-        html_path = os.path.join(user_dir, "zvit.html")
+        # Зберігаємо єдиний HTML файл
+        html_path = os.path.join(user_dir, "Zvit.html")
         with open(html_path, "w", encoding="utf-8") as f:
             f.write("\n".join(html_lines))
-            
-        # Пакуємо в ZIP
-        zip_path = f"report_{user_id}.zip"
-        with zipfile.ZipFile(zip_path, 'w') as zipf:
-            for root, dirs, files in os.walk(user_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    zipf.write(file_path, arcname=file) 
                     
-        archive_file = FSInputFile(zip_path, filename="V візуальний_звіт.zip")
+        # Відправляємо ТІЛЬКИ HTML файл, без архіву
+        report_file = FSInputFile(html_path, filename="Zvit.html")
         await message.answer_document(
-            document=archive_file, 
-            caption=f"🎉 Звіт готовий!\nРозпакуйте архів і відкрийте файл `zvit.html` у браузері."
+            document=report_file, 
+            caption=f"🎉 Звіт готовий!\nПросто завантажте і відкрийте цей файл. Всі фото вже всередині нього."
         )
         
         user_sessions[user_id] = []
@@ -128,8 +123,6 @@ async def cmd_report(message: types.Message):
     finally:
         if os.path.exists(user_dir):
             shutil.rmtree(user_dir)
-        if os.path.exists(f"report_{user_id}.zip"):
-            os.remove(f"report_{user_id}.zip")
 
 async def health_check(request):
     return web.Response(text="Bot is running!")
